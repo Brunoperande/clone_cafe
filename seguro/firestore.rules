@@ -1,0 +1,122 @@
+// ========================================
+// 🔐 REGRAS DE SEGURANÇA DO FIRESTORE
+// ========================================
+// Estas regras controlam quem pode acessar
+// quais documentos e fazer quais operações
+// ========================================
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 🚫 REGRA PADRÃO: Negar tudo
+    // (Segurança por padrão - whitelisting)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // 👤 COLEÇÃO: usuarios
+    // Cada usuário pode ler/escrever seus próprios dados
+    match /usuarios/{userId} {
+      // Usuário autenticado pode acessar seus dados
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Qualquer um pode ver perfil público (apenas alguns campos)
+      allow read: if request.auth != null;
+    }
+
+    // ☕ COLEÇÃO: produtos
+    // Todos podem ver produtos (são públicos)
+    // Apenas admin pode editar
+    match /produtos/{produtoId} {
+      // ✅ Qualquer um pode ler produtos
+      allow read: if true;
+      
+      // ✅ Apenas admin pode criar/editar/deletar
+      allow write: if request.auth != null && hasRole('admin');
+    }
+
+    // 📦 COLEÇÃO: pedidos
+    // Cada usuário vê apenas seus pedidos
+    match /pedidos/{pedidoId} {
+      // Usuário pode ler seus próprios pedidos
+      allow read: if request.auth != null && 
+                     request.auth.uid == resource.data.userId;
+      
+      // Usuário pode criar novo pedido
+      allow create: if request.auth != null && 
+                       request.resource.data.userId == request.auth.uid;
+      
+      // Usuário pode atualizar seu próprio pedido
+      allow update: if request.auth != null && 
+                       resource.data.userId == request.auth.uid;
+      
+      // Admin pode atualizar qualquer pedido
+      allow update: if request.auth != null && hasRole('admin');
+      
+      // Usuário não pode deletar pedidos
+      allow delete: if false;
+    }
+
+    // 📂 COLEÇÃO: categorias
+    // Todos podem ver categorias
+    // Apenas admin pode editar
+    match /categorias/{categoriaId} {
+      allow read: if true;  // ✅ Públicas
+      allow write: if request.auth != null && hasRole('admin');  // ✅ Admin only
+    }
+
+    // 🛒 COLEÇÃO: carrinho (subcoleção de usuarios)
+    // Cada usuário vê apenas seu carrinho
+    match /usuarios/{userId}/carrinho/{itemId} {
+      allow read, write: if request.auth != null && 
+                           request.auth.uid == userId;
+    }
+
+    // 📝 COLEÇÃO: avaliações
+    // Todos podem ver avaliações
+    // Autenticados podem criar/editar suas próprias
+    match /avaliacoes/{avaliacaoId} {
+      allow read: if true;  // ✅ Todos leem
+      allow create: if request.auth != null;  // ✅ Autenticado pode criar
+      allow update, delete: if request.auth != null && 
+                               resource.data.userId == request.auth.uid;
+    }
+  }
+}
+
+// ========================================
+// 🛡️ FUNÇÕES DE SEGURANÇA
+// ========================================
+
+// Função: Verificar se usuário tem um role específico
+// Uso: hasRole('admin')
+function hasRole(role) {
+  return request.auth != null && 
+    get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == role;
+}
+
+// Função: Verificar se dados são válidos
+// Uso: isValidPedido()
+function isValidPedido() {
+  let data = request.resource.data;
+  return data.keys().hasAll(['userId', 'dataPedido', 'itens', 'total']) &&
+         data.total is number &&
+         data.itens is list;
+}
+
+// Função: Verificar se usuário é dono
+// Uso: isOwner(userId)
+function isOwner(userId) {
+  return request.auth != null && request.auth.uid == userId;
+}
+
+// ========================================
+// 📋 NOTAS IMPORTANTES
+// ========================================
+// 1. Regras são avaliadas de cima para baixo
+// 2. Primeira regra match interrompe o fluxo
+// 3. Sempre comece com regras restritivas
+// 4. Use request.auth para verificar usuário
+// 5. Use resource para acessar documento atual
+// 6. Use request.resource para dado novo
